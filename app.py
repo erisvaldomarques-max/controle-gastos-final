@@ -3,7 +3,6 @@ import re
 import requests
 from flask import Flask, request, jsonify, render_template
 from twilio.twiml.messaging_response import MessagingResponse
-from twilio.rest import Client
 from database import salvar_transacao, buscar_transacoes_por_mes
 import sqlite3
 from datetime import datetime
@@ -28,61 +27,41 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 # ==========================================
 
 def transcrever_audio(url_audio):
-    """Baixa o áudio usando a biblioteca oficial do Twilio e transcreve com Groq"""
+    """Baixa o áudio do WhatsApp e transcreve usando Groq"""
     try:
         from groq import Groq
         
-        print(f"📥 Baixando áudio usando Twilio SDK...")
+        print(f"📥 Baixando áudio de: {url_audio}")
         
-        # Inicializa o cliente Twilio
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        # Faz a requisição com autenticação básica do Twilio
+        auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
         
-        # Extrai o SID da mensagem e da mídia da URL
-        import re
-        message_match = re.search(r'Messages/([A-Za-z0-9]+)', url_audio)
-        media_match = re.search(r'Media/([A-Za-z0-9]+)', url_audio)
+        audio_response = requests.get(url_audio, auth=auth, headers=headers)
         
-        if not message_match or not media_match:
-            print("❌ Não foi possível extrair os SIDs da URL")
+        if audio_response.status_code == 401:
+            print("❌ Erro 401: Não autorizado. Verifique seu Auth Token.")
             return None
             
-        message_sid = message_match.group(1)
-        media_sid = media_match.group(1)
-        
-        print(f"📨 Message SID: {message_sid}")
-        print(f"📎 Media SID: {media_sid}")
-        
-        # ==========================================
-        # BAIXA O ÁUDIO USANDO REQUESTS (ALTERNATIVA)
-        # ==========================================
-        
-        # Tenta baixar com autenticação básica
-        auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        
-        # Constrói a URL correta para baixar a mídia
-        media_url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages/{message_sid}/Media/{media_sid}"
-        
-        print(f"📥 Baixando de: {media_url}")
-        
-        response = requests.get(media_url, auth=auth)
-        
-        if response.status_code != 200:
-            print(f"❌ Erro ao baixar áudio: {response.status_code}")
+        if audio_response.status_code != 200:
+            print(f"❌ Erro ao baixar áudio: {audio_response.status_code}")
             return None
         
-        # Salva o conteúdo do áudio
+        # Salva o arquivo
         with open('temp_audio.ogg', 'wb') as f:
-            f.write(response.content)
+            f.write(audio_response.content)
         
         print("✅ Áudio baixado com sucesso!")
         print("📤 Enviando para Groq para transcrição...")
         
         # Inicializa o cliente Groq
-        groq_client = Groq(api_key=GROQ_API_KEY)
+        client = Groq(api_key=GROQ_API_KEY)
         
         # Transcreve o áudio
         with open('temp_audio.ogg', 'rb') as audio_file:
-            transcription = groq_client.audio.transcriptions.create(
+            transcription = client.audio.transcriptions.create(
                 file=audio_file,
                 model="whisper-large-v3",
                 language="pt",
@@ -98,6 +77,7 @@ def transcrever_audio(url_audio):
     except Exception as e:
         print(f"❌ Erro ao transcrever áudio: {e}")
         return None
+
 # ==========================================
 # FUNÇÕES AUXILIARES
 # ==========================================
@@ -290,9 +270,17 @@ def dashboard():
         ]
     })
 
+# ==========================================
+# ROTA PRINCIPAL
+# ==========================================
+
 @app.route("/", methods=['GET'])
 def home():
-    return render_template('dashboard.html')
+    return "🚀 Bot do WhatsApp está rodando! Envie uma mensagem para testar."
+
+# ==========================================
+# INICIALIZAÇÃO
+# ==========================================
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
